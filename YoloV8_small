@@ -1,4 +1,4 @@
-import os
+[12:27, 25/04/2025] Giovanni Ntnu: import os
 from ultralytics import YOLO
 import yaml
 
@@ -25,8 +25,36 @@ def train_model():
     results = model.train(
         data=data_yaml_path,
         epochs=50,  # Aumento delle epoche
-        #imgsz=1024,
-        batch=32,  # Aumento del batch size
+        #im…
+[13:51, 25/04/2025] Giovanni Ntnu: import os
+from ultralytics import YOLO
+import yaml
+
+# === Config ===
+dataset_path = "C:/Users/giovy/Desktop/Model1/Dataset1"
+data_yaml_path = os.path.join(dataset_path, "data.yaml")
+model_variant = "yolov8s.pt"
+save_name = "train_pole_yolov8s_tuned"
+
+def train_model():
+    if not os.path.exists(data_yaml_path):
+        print(f"❌ File data.yaml non trovato in {data_yaml_path}")
+        return
+
+    with open(data_yaml_path, 'r') as f:
+        data = yaml.safe_load(f)
+        print(f"✅ Dataset YAML caricato:\nTrain: {data['train']}\nVal: {data['val']}")
+
+    model = YOLO(model_variant)
+
+    print("🚀 Avvio allenamento...")
+
+    # Iniziamo l'allenamento
+    results = model.train(
+        data=data_yaml_path,
+        epochs=50,  # Aumento delle epoche
+        imgsz=1536,
+        batch=8,  # Aumento del batch size
         lr0=0.00015,  # Abbassamento del learning rate
         momentum=0.937,
         weight_decay=0.0005,
