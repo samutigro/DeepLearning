@@ -1,0 +1,229 @@
+import os
+import json
+import torch
+import random
+import numpy as np
+import cv2
+from detectron2 import model_zoo
+from detectron2.data import DatasetCatalog, MetadataCatalog
+from detectron2.engine import DefaultTrainer, DefaultPredictor
+from detectron2.config import get_cfg
+from detectron2.structures import BoxMode
+from detectron2.utils.logger import setup_logger
+from detectron2.evaluation import COCOEvaluator, inference_on_dataset
+from detectron2.data import build_detection_test_loader
+from detectron2.utils.visualizer import Visualizer
+from detectron2.checkpoint import DetectionCheckpointer
+import copy
+from detectron2.data import detection_utils as utils
+from detectron2.data import transforms as T
+from detectron2.data import build_detection_train_loader
+
+
+from detectron2.data import DatasetMapper
+
+def custom_mapper(dataset_dict, cfg):  # globale o passalo dove serve
+    mapper = DatasetMapper(cfg, is_train=True)
+    return mapper(dataset_dict)
+
+
+
+# === Setup Logger ===
+setup_logger()
+
+# === Carica COCO-style dataset ===
+def get_pole_dicts(img_dir, json_file):
+    with open(json_file) as f:
+        data = json.load(f)
+
+    dataset_dicts = []
+    for image_info in data["images"]:
+        record = {
+            "file_name": os.path.join(img_dir, image_info["file_name"]),
+            "image_id": image_info["id"],
+            "height": image_info["height"],
+            "width": image_info["width"],
+            "annotations": [],
+        }
+
+        for ann in data["annotations"]:
+            if ann["image_id"] == image_info["id"]:
+                obj = {
+                    "bbox": ann["bbox"],
+                    "bbox_mode": BoxMode.XYWH_ABS,
+                    "category_id": ann["category_id"],
+                    "iscrowd": 0,
+                }
+                record["annotations"].append(obj)
+
+        dataset_dicts.append(record)
+    return dataset_dicts
+
+# === Registra tutti i dataset ===
+def register_all_datasets():
+    base_path = "C:/Users/giovy/Desktop/Model2/Dataset2/lidar/combined_color"
+    for split in ["train", "valid", "test"]:  # includi 'test' per il dataset di test
+        img_dir = os.path.join(base_path, f"images/{split}")
+        json_path = os.path.join(base_path, f"annotations/instances_{split}.json")
+        dataset_name = f"pole_{split}"
+
+        DatasetCatalog.register(dataset_name, lambda img_dir=img_dir, json_path=json_path: get_pole_dicts(img_dir, json_path))
+        MetadataCatalog.get(dataset_name).set(
+            thing_classes=["pole"],
+            evaluator_type="coco",
+            json_file=json_path,
+            image_root=img_dir,
+        )
+
+# === Trainer custom ===
+class MyTrainer(DefaultTrainer):
+    @classmethod
+    def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+        if output_folder is None:
+            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
+        os.makedirs(output_folder, exist_ok=True)
+        # Correzione: passiamo i parametri esplicitamente al COCOEvaluator
+        return COCOEvaluator(dataset_name, cfg, False, output_folder)
+    
+"""class MyTrainer(DefaultTrainer):
+    @classmethod
+    def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+        if output_folder is None:
+            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
+        os.makedirs(output_folder, exist_ok=True)
+        return COCOEvaluator(dataset_name, cfg, False, output_folder)
+
+    @classmethod
+    def build_train_loader(cls, cfg):
+        return build_detection_train_loader(cfg, mapper=custom_mapper)"""
+
+# === Train Model ===
+"""def train_model(num_epochs=50):
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.DATASETS.TRAIN = ("pole_train",)
+    cfg.DATASETS.TEST = ("pole_valid",)
+    cfg.DATALOADER.NUM_WORKERS = 8
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1  # Solo 1 classe: 'pole'
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+    cfg.SOLVER.IMS_PER_BATCH = 4
+    cfg.SOLVER.BASE_LR = 0.00015
+    cfg.SOLVER.WEIGHT_DECAY = 0.0005
+    cfg.SOLVER.STEPS = []  # No LR decay
+    cfg.SOLVER.WARMUP_ITERS = 1000
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
+    #cfg.INPUT.MIN_SIZE_TRAIN = (1024,)
+    #cfg.INPUT.MIN_SIZE_TEST = 1024
+    #cfg.INPUT.MIN_SIZE_TEST = 1208
+    #cfg.INPUT.MAX_SIZE_TEST = 1920
+    cfg.MODEL.BACKBONE.FREEZE_AT = 1
+    cfg.OUTPUT_DIR = "./output"
+    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Modifica il numero di iterazioni per adattarlo al tuo dataset
+    cfg.SOLVER.MAX_ITER = 2000# Calcola in base alle dimensioni del tuo dataset
+
+    trainer = MyTrainer(cfg)
+    trainer.resume_or_load(resume=False)
+    trainer.train()
+
+    print("\n📊 Valutazione finale sul validation set:")
+    # Correzione: rimuovere il parametro 'cfg' da COCOEvaluator e passare parametri esplicitamente
+    evaluator = COCOEvaluator(
+        dataset_name=cfg.DATASETS.TEST[0],
+        output_dir="./output/",
+    )
+
+    val_loader = build_detection_test_loader(cfg, "pole_valid")
+    inference_on_dataset(trainer.model, val_loader, evaluator)
+
+    return cfg"""
+
+
+
+def train_model(num_epochs=50):
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.DATASETS.TRAIN = ("pole_train",)
+    cfg.DATASETS.TEST = ("pole_valid",)
+    cfg.DATALOADER.NUM_WORKERS = 8
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
+
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1  # Solo "pole" e sfondo
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+
+    # All other settings remain the same
+    cfg.SOLVER.IMS_PER_BATCH = 4
+    cfg.SOLVER.BASE_LR = 0.001
+    cfg.SOLVER.WEIGHT_DECAY = 0.0005
+    cfg.SOLVER.STEPS = []  # No LR decay
+    cfg.SOLVER.WARMUP_ITERS = 1000
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
+
+    #roba in più
+    cfg.INPUT.RANDOM_FLIP = "horizontal"
+    #cfg.INPUT.MIN_SIZE_TRAIN = 1208
+    #cfg.INPUT.MAX_SIZE_TRAIN = 1920
+    #cfg.INPUT.FORMAT = "BGR"
+    #cfg.INPUT.PIXEL_MEAN = [103.530, 116.280, 123.675]
+    #cfg.INPUT.PIXEL_STD = [1.0, 1.0, 1.0]
+
+    #cfg.INPUT.MIN_SIZE_TRAIN = (1024,)
+    #cfg.INPUT.MIN_SIZE_TEST = 1024
+    cfg.MODEL.BACKBONE.FREEZE_AT = 0
+    cfg.OUTPUT_DIR = "./output"
+    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Numero di iterazioni
+    steps_per_epoch = 50
+    cfg.SOLVER.MAX_ITER = 2000
+
+    trainer = MyTrainer(cfg)
+    trainer.resume_or_load(resume=False)
+    trainer.train()
+
+    print("\n📊 Valutazione finale sul validation set:")
+    evaluator = COCOEvaluator("pole_valid", cfg, False, output_dir=cfg.OUTPUT_DIR)
+    val_loader = build_detection_test_loader(cfg, "pole_valid")
+    metrics = inference_on_dataset(trainer.model, val_loader, evaluator)
+
+    print("\n📈 Risultati principali:")
+    try:
+        print(f"• Precision:       {metrics['bbox']['precision']:.4f}")
+        print(f"• Recall:          {metrics['bbox']['recall']:.4f}")
+        print(f"• mAP@0.5:         {metrics['bbox']['AP50']:.4f}")
+        print(f"• mAP@0.5:0.95:    {metrics['bbox']['AP']:.4f}")
+    except Exception as e:
+        print("⚠ Impossibile estrarre le metriche in modo automatico.")
+
+    return cfg
+
+
+
+
+# === Inference su immagini del test set ===
+def run_inference(cfg, num_images=5):
+    predictor = DefaultPredictor(cfg)
+    test_metadata = MetadataCatalog.get("pole_test")
+    test_dataset = get_pole_dicts(test_metadata.image_root, test_metadata.json_file)
+
+    for d in random.sample(test_dataset, num_images):
+        im = cv2.imread(d["file_name"])
+        outputs = predictor(im)
+        v = Visualizer(im[:, :, ::-1], metadata=test_metadata, scale=1.0)
+        out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+        # Salva le predizioni su disco invece di usare cv2.imshow() (nel caso non sia possibile mostrarle)
+        cv2.imwrite(f"prediction_{d['image_id']}.jpg", out.get_image()[:, :, ::-1])
+
+# === MAIN ===
+def main():
+    register_all_datasets()
+    num_epochs = 50  # Cambia da qui se vuoi passare a 100 o più
+    cfg = train_model(num_epochs)
+    run_inference(cfg)
+
+if _name_ == "_main_":
+    main()
