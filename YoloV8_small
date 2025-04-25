@@ -1,0 +1,89 @@
+import os
+from ultralytics import YOLO
+import yaml
+
+# === Config ===
+dataset_path = "C:/Users/giovy/Desktop/Model1/Dataset1"
+data_yaml_path = os.path.join(dataset_path, "data.yaml")
+model_variant = "yolov8s.pt"
+save_name = "train_pole_yolov8s_tuned"
+
+def train_model():
+    if not os.path.exists(data_yaml_path):
+        print(f"❌ File data.yaml non trovato in {data_yaml_path}")
+        return
+
+    with open(data_yaml_path, 'r') as f:
+        data = yaml.safe_load(f)
+        print(f"✅ Dataset YAML caricato:\nTrain: {data['train']}\nVal: {data['val']}")
+
+    model = YOLO(model_variant)
+
+    print("🚀 Avvio allenamento...")
+
+    # Iniziamo l'allenamento
+    results = model.train(
+        data=data_yaml_path,
+        epochs=50,  # Aumento delle epoche
+        #imgsz=1024,
+        batch=32,  # Aumento del batch size
+        lr0=0.00015,  # Abbassamento del learning rate
+        momentum=0.937,
+        weight_decay=0.0005,
+        warmup_epochs=3,
+        workers=8,
+        label_smoothing=0.05,
+        device='cuda',
+        cos_lr=True,  # Cosine LR scheduler
+        amp=True,
+        freeze=1,  # Congelamento dei primi 10 layer
+        hsv_h=0.015,
+        hsv_s=0.5,  # Diminuisci leggermente la saturazione
+        hsv_v=0.4,  # Diminuisci leggermente la luminosità
+        fliplr=0.5,  # Probabilità di flipping a metà
+        mosaic=0.3,     # Aumento mosaico
+        scale=0.3,
+        translate=0.05,
+        mixup=0.05,
+        save=True,
+        save_period=5,
+        name=save_name,
+        project="yolo_pole_detection",
+        exist_ok=True,
+        resume=False,
+    )
+
+    
+
+    # === Monitoraggio delle performance ===
+    try:
+        precision, recall, map50, map5095 = results.box.mean_results()
+        print("\n📈 Performance Metrics sul validation set:")
+        print(f"• Precision:       {precision:.4f}")
+        print(f"• Recall:          {recall:.4f}")
+        print(f"• mAP@0.5:         {map50:.4f}")
+        print(f"• mAP@0.5:0.95:    {map5095:.4f}")
+    except Exception as e:
+        print(f"⚠️ Errore durante l'estrazione delle metriche: {e}")
+
+
+        # === Generazione delle predizioni per il set di test ===
+    print("\n🔍 Generazione delle predizioni sul set di test...")
+
+    output_folder = "C:/Users/giovy/Desktop/Model1/predictions"
+    sub_folder = "yolo_txt"
+
+    model.predict(
+        source="C:/Users/giovy/Desktop/Model1/Dataset1/lidar/combined_color/images/test",
+        project=output_folder,
+        name=sub_folder,
+        save_txt=True,
+        save_conf=True,
+        device='cuda'
+    )
+
+    print(f"✅ Predizioni salvate in: {os.path.join(output_folder, sub_folder, 'labels')}")
+
+
+if _name_ == "_main_":
+    train_model()
